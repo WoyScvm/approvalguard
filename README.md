@@ -10,7 +10,7 @@ No sign-in. No API keys. No funds. Read-only: it never asks for a seed
 phrase, private key, or signature, and it cannot revoke anything.
 
 - **Competition:** [Agent Games by ZkVerify](https://agentgames.zkverify.io/) — Wildcard track
-- **Live demo:** _(public endpoint URL goes here after deployment)_
+- **Live demo:** https://approvalguard-production.up.railway.app (Railway trial; `/health`, `/scan`, `/example`)
 - **Agent public key (Ed25519, hex):** `2357efc2a0fc150b830003c2ae5f13efb2e6c8ae33d4e89eeafa926b97b63400`
   (also in `public_key.txt` and `GET /health`)
 
