@@ -1,0 +1,11 @@
+# Agent signing key -- NEVER commit. Holds no funds, but its signatures
+# authenticate ApprovalGuard reports. Each deployment generates its own.
+agent_key.json
+agent_key.json.tmp
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Local test artifacts
+.DS_Store

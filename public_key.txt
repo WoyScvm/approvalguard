@@ -1,0 +1,9 @@
+ApprovalGuard agent Ed25519 public key (hex)
+Generated 2026-11-18 with the project keypair in agent_key.json (gitignored, never committed).
+Verify any report signature against this key via POST /verify.
+
+2357efc2a0fc150b830003c2ae5f13efb2e6c8ae33d4e89eeafa926b97b63400
+
+If you deploy a fresh copy without agent_key.json, the server generates a
+new keypair on first start and prints the new public key: update this file,
+the README, and the submission form accordingly.

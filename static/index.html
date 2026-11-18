@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ApprovalGuard — Wallet Approval Security Scanner</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; max-width: 900px; margin: 0 auto; padding: 24px; line-height: 1.5; }
+  h1 { font-size: 1.6em; margin-bottom: 0; }
+  .sub { color: gray; margin-top: 4px; }
+  form { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0; }
+  input[type=text] { flex: 1 1 420px; padding: 10px; font-size: 1em; font-family: monospace; }
+  select, button { padding: 10px 14px; font-size: 1em; cursor: pointer; }
+  button.primary { font-weight: 700; }
+  .card { border: 1px solid gray; border-radius: 8px; padding: 16px; margin: 12px 0; }
+  .risk-CRITICAL { border-color: #c00; } .risk-HIGH { border-color: #e60; }
+  .risk-MEDIUM { border-color: #ca0; } .risk-LOW { border-color: #090; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9em; }
+  th, td { border-bottom: 1px solid gray; padding: 6px 8px; text-align: left; vertical-align: top; }
+  code { font-size: 0.85em; word-break: break-all; }
+  .flag { display: inline-block; border: 1px solid currentColor; border-radius: 4px; padding: 0 6px; margin: 1px; font-size: 0.8em; }
+  .muted { color: gray; font-size: 0.9em; }
+  #status { margin: 12px 0; font-weight: 600; }
+  pre { white-space: pre-wrap; word-break: break-all; font-size: 0.8em; }
+  details { margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>🛡️ ApprovalGuard</h1>
+<p class="sub">Wallet-approval security scanner agent. Paste any EVM address — it scans ERC20 token approvals from public on-chain data (no keys, no sign-in) and returns a signed risk report.</p>
+
+<form id="scanForm">
+  <input type="text" id="address" value="0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045" spellcheck="false" aria-label="Wallet address">
+  <select id="chain" aria-label="Chain">
+    <option value="ethereum" selected>Ethereum</option>
+  </select>
+  <select id="depth" aria-label="Scan depth">
+    <option value="quick" selected>Quick scan</option>
+    <option value="full">Full scan (slower)</option>
+  </select>
+  <button class="primary" type="submit">Scan approvals</button>
+</form>
+<p class="muted">Try the prefilled address (vitalik.eth), or any address you own. Quick scans check recent history; full scans walk the whole outgoing-transaction history. A full scan of a busy address can take a couple of minutes.</p>
+
+<div id="status"></div>
+<div id="results"></div>
+
+<h2>How it works</h2>
+<ul>
+  <li><b>Discovery:</b> outgoing transactions are scanned for <code>approve()</code> calls (full history), plus a recent-window <code>eth_getLogs</code> scan for permit-based approvals.</li>
+  <li><b>Verification:</b> every discovered approval's <em>current</em> allowance is read on-chain, and each spender is checked for contract code.</li>
+  <li><b>Risk flags:</b> unlimited allowances, externally owned spenders, unknown spenders, stale approvals, and allowances exceeding the current balance.</li>
+  <li><b>Signed reports:</b> every report is signed with the agent's Ed25519 key. Verify any report below or via <code>POST /verify</code>.</li>
+</ul>
+
+<h2>API</h2>
+<pre>GET  /health                      liveness + agent public key
+GET  /scan?address=0x...&amp;depth=quick
+POST /scan                        {"address": "0x...", "chain": "ethereum", "depth": "full"}
+POST /agent                       Agent Games task envelope (HMAC-aware)
+POST /verify                      {"report": {...signed report...}} → {"valid": true/false}
+GET  /example                     a real signed example report</pre>
+
+<h2>Verify a report</h2>
+<p class="muted">Paste a full signed report JSON (from a scan above or <a href="/example">/example</a>) and check its signature.</p>
+<form id="verifyForm">
+  <textarea id="reportJson" rows="6" style="width:100%" placeholder='{"agent": "ApprovalGuard", ..., "signature": {...}}'></textarea>
+  <button type="submit">Verify signature</button>
+</form>
+<div id="verifyResult"></div>
+
+<p class="muted">ApprovalGuard is read-only. It never asks for a seed phrase, private key, or signature, and it cannot revoke anything. Built for the <a href="https://agentgames.zkverify.io/events/wildcard">Agent Games Wildcard track</a>. Source and docs: see the project README.</p>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+$("scanForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const address = $("address").value.trim();
+  const chain = $("chain").value;
+  const depth = $("depth").value;
+  $("status").textContent = "Scanning " + address + " (" + chain + ", " + depth + ")… this reads live chain data, please wait.";
+  $("results").innerHTML = "";
+  try {
+    const res = await fetch("/scan?address=" + encodeURIComponent(address) + "&chain=" + chain + "&depth=" + depth);
+    const data = await res.json();
+    if (!res.ok) { $("status").textContent = "Error: " + esc(data.error || res.status); return; }
+    $("status").textContent = "Scan complete in " + data.scan_seconds + "s at block " + data.block_number + ".";
+    renderReport(data);
+  } catch (err) {
+    $("status").textContent = "Request failed: " + err.message;
+  }
+});
+
+function renderReport(data) {
+  const s = data.summary;
+  let html = `<div class="card risk-${s.risk_level}"><h2>Risk: ${s.risk_level} (score ${s.risk_score}/100)</h2>
+    <p>${esc(s.plain_language)}</p>
+    <p>Active approvals: <b>${s.active_approvals}</b> · Revoked: ${s.revoked_approvals} · Unlimited: <b>${s.unlimited_approvals}</b> · EOA spenders: ${s.eoa_spenders} · Unknown spenders: ${s.unknown_spenders}</p>
+    <ul>${s.recommendations.map(r => `<li>${esc(r)}</li>`).join("")}</ul></div>`;
+  html += `<div class="card"><h3>Approvals (${data.approvals.length})</h3><table>
+    <tr><th>Token</th><th>Spender</th><th>Allowance</th><th>Status</th><th>Flags</th></tr>
+    ${data.approvals.map(a => `<tr>
+      <td>${esc(a.token_symbol || a.token_name || "unknown")}<br><code>${esc(a.token.slice(0,10))}…${esc(a.token.slice(-6))}</code></td>
+      <td>${esc(a.spender_label || (a.spender_is_contract ? "contract" : "EOA"))}<br><code>${esc(a.spender.slice(0,10))}…${esc(a.spender.slice(-6))}</code></td>
+      <td>${esc(a.allowance ?? "?")}</td>
+      <td>${esc(a.status)}${a.unlimited ? " · unlimited" : ""}</td>
+      <td>${a.risk_flags.map(f => `<span class="flag" title="${esc(f.detail)}">${esc(f.code)}</span>`).join(" ")}</td>
+    </tr>`).join("")}</table></div>`;
+  html += `<div class="card"><h3>Signature</h3>
+    <p class="muted">Ed25519 signature over the canonical JSON of this report. Public key: <code>${esc(data.signature.public_key)}</code></p>
+    <pre>${esc(data.signature.signature)}</pre>
+    <details><summary>Full report JSON</summary><pre>${esc(JSON.stringify(data, null, 2))}</pre></details></div>`;
+  html += `<div class="card"><h3>Coverage &amp; limitations</h3><pre>${esc(JSON.stringify(data.coverage, null, 2))}</pre></div>`;
+  $("results").innerHTML = html;
+}
+
+$("verifyForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  let report;
+  try { report = JSON.parse($("reportJson").value); }
+  catch { $("verifyResult").textContent = "Invalid JSON."; return; }
+  const res = await fetch("/verify", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({report}) });
+  const data = await res.json();
+  $("verifyResult").innerHTML = data.valid
+    ? "<b>✅ Signature valid.</b> This report was signed by the agent key " + esc(data.public_key) + "."
+    : "<b>❌ Signature INVALID:</b> " + esc(data.reason || "verification failed");
+});
+</script>
+</body>
+</html>
